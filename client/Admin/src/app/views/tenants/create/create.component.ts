@@ -19,6 +19,13 @@ export class CreateComponent implements OnInit {
     tenantAddress: [null],
   });
 
+  stripePlans: { [key: string]: string } = {
+    BASIC: 'price_1PWnbbGaGaoOvAePZvk8VRp0',
+    STANDARD: 'price_1PaQggGaGaoOvAePWhmKJZYq',
+    PREMIUM: 'price_1PaQhBGaGaoOvAePQFGPdhBK',
+    PLATINUM: 'price_1PaQjjGaGaoOvAePt9PIecSV',
+  };
+
   constructor(
     private fb: FormBuilder,
     private tenantSvc: TenantsService,
@@ -39,6 +46,7 @@ export class CreateComponent implements OnInit {
     const data = {
       ...this.tenantForm.value,
       tenantStatus: 'In progress',
+      priceId: this.stripePlans[this.tenantForm.value.tier],
     };
 
     this.tenantSvc.post(data).subscribe({

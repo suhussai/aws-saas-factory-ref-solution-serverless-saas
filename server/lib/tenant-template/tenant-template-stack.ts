@@ -1,5 +1,6 @@
-import { Stack, StackProps, CfnOutput, Duration } from 'aws-cdk-lib';
+import { Stack, StackProps, CfnOutput, Duration, aws_logs_destinations } from 'aws-cdk-lib';
 import { PythonLayerVersion, PythonFunction } from '@aws-cdk/aws-lambda-python-alpha';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { IdentityProvider } from './identity-provider';
@@ -14,6 +15,9 @@ import {
   AwsCustomResourcePolicy,
   PhysicalResourceId,
 } from 'aws-cdk-lib/custom-resources';
+import { CfnDeliveryStream } from 'aws-cdk-lib/aws-kinesisfirehose';
+import { FilterPattern } from 'aws-cdk-lib/aws-logs';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 interface TenantTemplateStackProps extends StackProps {
   stageName: string;
@@ -25,6 +29,7 @@ interface TenantTemplateStackProps extends StackProps {
   tenantMappingTable: Table;
   commitId: string;
   waveNumber?: string;
+  kinesisDataStream: CfnDeliveryStream;
 }
 
 export class TenantTemplateStack extends Stack {
@@ -72,6 +77,47 @@ export class TenantTemplateStack extends Stack {
       isPooledDeploy: props.isPooledDeploy,
       lambdaServerlessSaaSLayers: lambdaServerlessSaaSLayers,
       tenantScopedAccessRole: apiGateway.tenantScopedAccessRole,
+    });
+
+    const lambdaPowerToolsLayerARN = `arn:aws:lambda:${
+      Stack.of(this).region
+    }:017000801446:layer:AWSLambdaPowertoolsPythonV2:59`;
+
+    // lambda responsible for parsing logs and pushing them to firehose
+    const processingLambda = new PythonFunction(this, 'processingLambda', {
+      entry: path.join(__dirname, '../../resources/processingLambda'),
+      runtime: lambda.Runtime.PYTHON_3_12,
+      index: 'index.py',
+      handler: 'handler',
+      timeout: Duration.seconds(30),
+      tracing: lambda.Tracing.ACTIVE,
+      layers: [
+        lambda.LayerVersion.fromLayerVersionArn(this, 'LambdaPowerTools', lambdaPowerToolsLayerARN),
+      ],
+      environment: {
+        FIREHOSE_STREAM_ARN: props.kinesisDataStream.attrArn,
+      },
+    });
+
+    processingLambda.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['firehose:PutRecord'],
+        resources: [props.kinesisDataStream.attrArn],
+      })
+    );
+
+    const createOrderLogGroup =
+      services.orderMicroservice.createLambdaFunctionConstruct.lambdaFunction.logGroup;
+    createOrderLogGroup.addSubscriptionFilter('createOrderLogGroupFilter', {
+      destination: new aws_logs_destinations.LambdaDestination(processingLambda),
+      filterPattern: FilterPattern.anyTerm('_aws'),
+    });
+
+    const createProductLogGroup =
+      services.productMicroservice.createLambdaFunctionConstruct.lambdaFunction.logGroup;
+    createProductLogGroup.addSubscriptionFilter('createProductLogGroupFilter', {
+      destination: new aws_logs_destinations.LambdaDestination(processingLambda),
+      filterPattern: FilterPattern.anyTerm('_aws'),
     });
 
     new AwsCustomResource(this, 'CreateTenantMapping', {

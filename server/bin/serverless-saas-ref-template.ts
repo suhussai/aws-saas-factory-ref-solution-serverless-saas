@@ -79,8 +79,20 @@ const apiKeySSMParameterNames = {
   },
 };
 
+// helper function to get moesifCredentials from SecretsManager
+function getMoesifCredential(jsonField: string) {
+  return cdk.SecretValue.secretsManager(`moesifCredentials`, {
+    jsonField: jsonField,
+  }).unsafeUnwrap(); // Review CDK docs before using unsafeUnwrap().
+}
+
 const controlPlaneStack = new ControlPlaneStack(app, 'ControlPlaneStack', {
   systemAdminEmail: systemAdminEmail,
+  moesifCredentials: {
+    moesifApplicationId: getMoesifCredential('moesifApplicationId'),
+    moesifManagementAPIKey: getMoesifCredential('moesifManagementAPIKey'),
+    billingProviderSecretKey: getMoesifCredential('billingProviderSecretKey'),
+  },
 });
 
 const bootstrapTemplateStack = new BootstrapTemplateStack(
@@ -110,6 +122,7 @@ const tenantTemplateStack = new TenantTemplateStack(
     ApiKeySSMParameterNames: apiKeySSMParameterNames,
     tenantMappingTable: bootstrapTemplateStack.tenantMappingTable,
     commitId: commitId,
+    kinesisDataStream: controlPlaneStack.moesifBilling.firehose.firehoseStream,
   }
 );
 

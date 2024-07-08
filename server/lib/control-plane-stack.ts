@@ -3,14 +3,21 @@ import { Construct } from 'constructs';
 import { CognitoAuth, ControlPlane } from '@cdklabs/sbt-aws';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { EventBus, Rule } from 'aws-cdk-lib/aws-events';
+import * as moesif from 'sbt-aws-moesif';
 
 interface ControlPlaneStackProps extends cdk.StackProps {
   systemAdminEmail: string;
+  moesifCredentials: {
+    moesifApplicationId: string;
+    moesifManagementAPIKey: string;
+    billingProviderSecretKey: string;
+  };
 }
 
 export class ControlPlaneStack extends cdk.Stack {
   public readonly regApiGatewayUrl: string;
   public readonly eventBusArn: string;
+  public readonly moesifBilling: moesif.MoesifBilling;
 
   constructor(scope: Construct, id: string, props: ControlPlaneStackProps) {
     super(scope, id, props);
@@ -19,10 +26,17 @@ export class ControlPlaneStack extends cdk.Stack {
       setAPIGWScopes: false, // done for testing purposes. Scopes should be used for added security in production!
     });
 
+    this.moesifBilling = new moesif.MoesifBilling(this, 'MoesifBilling', {
+      moesifApplicationId: props.moesifCredentials.moesifApplicationId,
+      moesifManagementAPIKey: props.moesifCredentials.moesifManagementAPIKey,
+      billingProviderSlug: moesif.BillingProviderSlug.STRIPE,
+      billingProviderSecretKey: props.moesifCredentials.billingProviderSecretKey,
+    });
 
     const controlPlane = new ControlPlane(this, 'ControlPlane', {
       auth: cognitoAuth,
       systemAdminEmail: props.systemAdminEmail,
+      billing: this.moesifBilling,
       apiCorsConfig: {
         allowOrigins: ['https://*'],
         allowCredentials: true,
